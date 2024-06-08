@@ -1,0 +1,1124 @@
+---
+title: 'Capstone CYO Project Report'
+subtitle: ' Prediction of Credit Risk for German Bank'
+author: 'Endri Raco'
+output:
+  pdf_document:
+    df_print: kable
+    toc: yes
+documentclass: report
+classoption: a4paper
+fig_height: 5
+fig_width: 5
+fontsize: 10pt
+highlight: zenburn
+latex_engine: xelatex
+mainfont: Arial
+mathfont: LiberationMono
+monofont: DejaVu Sans Mono
+urlcolor: blue
+bibliography: references.bib
+---
+
+---
+nocite: | 
+  @R-base, @R-data-table, @R-dplyr, @R-foreign, @R-ggplot2, @R-kableExtra, @R-knitr, @R-lattice, @R-nnet, @R-purrr, @R-rmarkdown, @R-survival, @R-tibble, @R-tidyr, @nnet2002,  @ROCR
+...
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE}
+## specify the packages needed
+ if(!require(rpart)) install.packages('rpart', 
+repos = 'http://cran.us.r-project.org')
+## specify the packages needed
+ if(!require(gmodels)) install.packages('gmodels', 
+repos = 'http://cran.us.r-project.org')
+ if(!require(ROCR)) install.packages('ROCR', 
+repos = 'http://cran.us.r-project.org')
+if(!require(epiDisplay)) install.packages('epiDisplay', 
+repos = 'http://cran.us.r-project.org')
+if(!require(kableExtra)) install.packages('kableExtra', 
+repos = 'http://cran.us.r-project.org')
+if(!require(dataCompareR)) install.packages('dataCompareR', 
+repos = 'http://cran.us.r-project.org')
+if(!require(tidyverse)) install.packages('tidyverse', 
+repos = 'http://cran.us.r-project.org')
+if(!require(caret)) install.packages('caret', 
+repos = 'http://cran.us.r-project.org')
+if(!require(data.table)) install.packages('data.table', 
+repos = 'http://cran.us.r-project.org')
+## specify global chunk options
+knitr::opts_chunk$set(fig.width = 5, fig.height = 4, dpi = 300,
+                      out.width = '90%', fig.align = 'center',
+                      tidy.opts=list(width.cutoff=60),
+                      tidy=TRUE,
+                      cache = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+## Dedication
+
+This project and all my work is dedicated to victims of Albanian earthquake 26 November 2019.
+
+
+## Acknowledgement
+
+I would like to express my special thanks of gratitude to Prof. Rafael Irizarry for the wonderful material and thorough explanations he provided during all courses. Also I want to thank my friends of this course who share the same interests for Data Science. 
+
+
+
+## Introduction
+
+Investopedia webpage defines **Credit risk** as the possibility of a loss resulting from a borrower's failure to repay a loan or meet contractual obligations.[@investopedia2019]
+
+By this definition, we understand that subject who gives the loan (in our case the bank) takes a risk during this process, because it is not known  a priori if client who applies and takes the loan will not default (fail to return the money). 
+
+Nowadays, banks and other financial institutions are taking advantange of machine learning methods to predict credit risks (refuse loans to risky customers).  
+
+The aim of this project is to use machine learning techniques such as logistic regression and decision trees for building a predictive model based on bank client's features. This model should help on understanding which client can be considered as a risky one. 
+
+We will use dataset [South German Credit]('https://data.ub.uni-muenchen.de/23/2/kredit.asc'). This dataset is a polished version of [German credit dataset] ('https://archive.ics.uci.edu/ml/machine-learning-databases/statlog/german/german.data') from  **UCI Machine Learning Repository** portal, donated by the German professor Hans Hofmann via the European Statlog project. 
+
+German credit dataset from the UCI Machine Learning Repository, donated by the
+German professor Hans Hofmann via the European Statlog project, comes with an incorrect code table.
+Many variables are wrongly represented, which implies that the data cannot be adequately used for
+experimenting with methods for interpretable machine learning. 
+
+The **South German Credit** data are meaningful,  credit scoring data from southern Germany In  dataset, each entry represents a person who takes a credit by a bank.[@gromping2019]  Each person is classified as good or bad credit risks according to the set of attributes.
+
+For all project calculations is used the following PC:
+
+```{r pc}
+print('Operating System:')
+version
+```
+
+&nbsp;
+
+## Methods and Analysis
+### Importing data
+
+&nbsp;
+
+For importing data in our project **data** folder we will use **readr** library, which is part
+of the **tidyverse** [@R-tidyverse]package:
+
+&nbsp;
+
+```{r data-download}
+# South German Credit Dataset:
+# https://data.ub.uni-muenchen.de/23/2/kredit.asc
+# Code for creating SouthGermanCredit.asc as described in @gromping2019
+temp <- read.table('https://data.ub.uni-muenchen.de/23/2/kredit.asc', header=TRUE)
+### recode pers and gastarb to the stated P2 coding
+temp$pers <- 3 - temp$pers
+temp$gastarb <- 3 - temp$gastarb
+### put credit_risk is last
+temp <- cbind(temp[,-1], kredit=temp$kredit)
+write.table(temp, file='./data/SouthGermanCredit.asc',
+row.names = FALSE, quote=FALSE)
+## save dataset in our data folder
+data_credit <- read.table('./data/SouthGermanCredit.asc', header=TRUE)
+# remove temp file
+remove(temp)
+```
+
+&nbsp;
+
+Let's have a look in the structure of downloaded dataset:
+
+&nbsp;
+
+```{r first-look, cache=TRUE}
+# Check structure of downloaded dataset
+str(data_credit)
+```
+
+&nbsp;
+
+We are dealing with an object of class **dataframe** containing 21 columns(variables) and 1000 rows(observations). 
+
+
+
+### Data Processing
+
+Since variables are missing names, it is hard initially to understand information represented in dataframe. According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) we have all variables as numeric variables. Let's check this fact in the downloaded dataframe.
+
+&nbsp;
+
+```{r show-attributes}
+split(names(data_credit),sapply(data_credit, function(x) paste(class(x), collapse=' ')))
+```
+&nbsp;
+
+Everything seems OK. In the results we see numeric variable **credit**. This column contains bank evaluation for customer (1 = Good, 0 = Bad).
+We will rename first 21 columns with more understandable english names so we can work them easily in the future analysis.
+
+&nbsp;
+
+```{r column-rename}
+# Rename columns
+data_credit  <- setNames(data_credit, 
+c('account_status', 'duration_month', 'credit_history', 'credit_purpose', 
+'credit_amount', 'savings_account', 'employment_present', 'installment_rate_pct', 'status_sex', 'other_debtors_guar', 
+'residence_duration', 'property', 'age_years', 'other_install_plans', 
+'housing', 'exist_credits_nr', 'job', 'dependents_nr', 'telephone_nr', 'foreign_worker', 'customer_good_bad'))
+```
+&nbsp;
+
+Let's print again the structure of dataset:
+
+&nbsp;
+
+```{r second-look}
+# Check structure of downloaded dataset
+str(data_credit)
+```
+&nbsp;
+
+Now we show the first five lines for columns 1 to 3:
+
+&nbsp;
+
+```{r five-lines}
+# First five lines using the function head
+kable_styling(
+              kable(head(data_credit[, 1:3], 5), digits = 3, row.names = FALSE, align = 'c',
+              caption = NULL, format = 'latex'),
+        latex_options = c('striped', 'basic'),
+        position = 'center', full_width = FALSE) 
+```
+
+&nbsp;
+
+Now we need to look if there are any missing values in our dataframe.
+
+&nbsp;
+
+```{r check-na-data}
+# Check data_credit dataframe for NA values
+sapply(data_credit, function(x) sum(is.na(x)))
+```
+
+&nbsp;
+
+Our dataset has no missing values. From attribute information provided in According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) we see that our variables **duration_month, credit_amount, age_years** are numeric and others are qualitative (categorical). 
+
+Let's transform our categorical variables to class **factor** for using them in our analysis.
+
+&nbsp;
+
+```{r convert-factors}
+# convert variables to class factor
+variables <- c('account_status','credit_history', 'credit_purpose', 'savings_account',      'employment_present', 'installment_rate_pct', 'status_sex', 'other_debtors_guar',   'residence_duration', 'property', 'other_install_plans', 'housing' ,  'exist_credits_nr',    
+'job',  'dependents_nr',  'telephone_nr', 'foreign_worker' ,'customer_good_bad')
+data_credit[,variables]  <- lapply(data_credit[,variables] , factor)
+```
+
+&nbsp;
+
+Result of transformations shown below:
+
+&nbsp;
+
+```{r convert-factors-result}
+# Factors vs numeric variables
+split(names(data_credit),sapply(data_credit, function(x) paste(class(x), collapse=' ')))
+```
+&nbsp;
+
+Let's view our dataset on which we will work further
+
+```{r transformed-dataset}
+# Transformed dataset
+str(data_credit)
+```
+
+## Exploring Data
+
+### Data Summary
+Our main goal is to build a model which should help on understanding which client can be considered as a risky one. As prof. Rafael Irizarry mentions[@irizarry2019] :  In Machine Learning, data comes in the form of:
+
+  1. the outcome we want to predict and
+  
+  2. the features that we will use to predict the outcome
+
+For us outcome we want to predict is variable **customer_good_bad**. This outcome depends on 
+the features that we will use to predict so we need to take a look in all the features and identify the ones of interest for the model.
+
+Let's first have  a thorough look at summary statistics for our outcome **customer_good_bad**. We will use function **tab1** from **epiDisplay** library [@R-epiDisplay].
+
+&nbsp;
+
+```{r customer_good_bad}
+# summary customer_good_bad
+tab1(data_credit$customer_good_bad, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'frequency',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'customer_good_bad', 
+    ylab = 'count', col=c('red','yellow','blue')) 
+```
+
+&nbsp;
+
+We see that our outcome variable contains values of 0s and 1s. As mentioned in attribute information value 1 corrensponds to customer status **Good** (reliable) and value 2 corrensponds to status **Bad**(non reliable). As we can see from barchart customers with status **Good** are 700 much more than customers with status **Bad** 300.
+
+&nbsp;
+
+Now we go on by taking some insights on other features and see which of them can be potential candidates on affecting our output. First, we start with **account_status**
+
+&nbsp;
+
+```{r account_status}
+# summary account_status
+tab1(data_credit$account_status, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'account_status', 
+    ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+We see that categorical variable **account_status** has 4 levels. According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) , We notice that largest percent of customers (39.4 %) have account status **>= 200 DM**. Beside that only 6.3 % have balance less than 200 DM. This level has very few observations comparing to other levels so maybe it is a good idea to recode variable **account_status** in only 3 levels and giving to these labels some more informative labels. Based on attribute meaning our 3 new levels for this variable will be: **no_account, no_money_acc, positive_acc**
+
+&nbsp;
+
+```{r recode_account_status}
+# recode account_status
+account_status_temp <- recode(data_credit$account_status, '3' ='positive_acc', '4'='positive_acc', '1' = 'no_account', '2' = 'no_money_acc')
+data_credit$account_status <- account_status_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r account_status_recode_result}
+# recoding results
+tab1(data_credit$account_status, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'account_status', 
+    ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+Now let's continue with our numeric variable **duration_month** . 
+
+&nbsp;
+
+```{r duration_month}
+# summary duration_month
+summary(data_credit$duration_month)
+data_credit %>% ggplot(aes(duration_month)) + geom_density()
+```
+&nbsp;
+
+We notice that credits have a minimum duration of 4 months and a maximum duration of 72 months. The average duration of credits is 20.9 months.
+
+&nbsp;
+
+Next feature is **credit_history**.
+
+&nbsp;
+
+```{r credit_history}
+#summary credit_history
+tab1(data_credit$credit_history, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'frequency',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'credit_history', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+We see that **credit_history** variable has 5 levels. According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) ,
+We see that most clients have no credits taken/all credits paid back duly (53 % of customers). Levels 0, 1, 3 (4% , 4.9%, 8.8%) has very few observations  comparing to other levels so maybe it is a good idea to recode this variable in only 3 levels : **pay_problems, all_paid, no_prob_currbank**
+
+&nbsp;
+
+```{r recode_credit_history}
+# recode credit_history
+credit_history_temp           <- recode(data_credit$credit_history, '0' = 'pay_problems', '1' = 'pay_problems', '2' = 'all_paid', '3' = 'no_prob_currbank', '4' = 'no_prob_currbank')
+data_credit$credit_history    <- credit_history_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r credit_history_recode_result}
+# recoding results
+tab1(data_credit$credit_history, sort.group = 'decreasing', cum.percent = FALSE, 
+bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', 
+xlab = 'credit_history', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+Next we move to feature **credit_purpose**.
+
+
+&nbsp;
+
+```{r credit_purpose}
+# summary credit_purpose
+tab1(data_credit$credit_purpose, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'credit_purpose', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) ,, this categorical variable should have 11 levels, but in our plot we see only 10. Level 7(education) has no observations.  Levels 8, 10, 4, 5, 6
+have very few observations  comparing to other levels so maybe it is a good idea to recode this variable in 4 levels: **new_car, used_car, domestic, services**.
+
+nbsp;
+
+
+```{r recode_credit_purpose}
+# recode credit_purpose
+credit_purpose_temp <- recode(data_credit$credit_purpose, '0' = 'services', '1' = 'new_car', '2' = 'used_car', '3' = 'domestic', '4' = 'domestic', '5' = 'domestic','6' = 'services', '7' = 'services', '8' = 'services',
+                              '9' = 'services', '10' = 'services')
+data_credit$credit_purpose <- credit_purpose_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r credit_purpose_recode_result}
+# recoding results
+tab1(data_credit$credit_purpose, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'credit_purpose', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+
+Now let's continue with our numeric variable **credit_amount** . 
+
+&nbsp;
+
+```{r credit_amount}
+# summary of credit_amount
+summary(data_credit$credit_amount)
+data_credit %>% ggplot(aes(credit_amount)) + geom_density()
+```
+&nbsp;
+
+We notice that credits required by bank clients have an average of 3271 DM.
+
+
+
+&nbsp;
+
+Next we move to feature **savings_account**.
+
+
+&nbsp;
+
+```{r savings_account}
+# summary savings_account
+tab1(data_credit$savings_account, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'savings_account', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) ,, this categorical variable has 5 levels. Levels 3 and 4
+have very few observations  comparing to other levels so maybe it is a good idea to recode this variable in  4 new levels **no_sav, less100, 100to1000, over1000**
+
+
+nbsp;
+
+
+```{r recode_savings_account}
+# recode savings_account
+savings_account_temp <- recode(data_credit$savings_account, '1' = 'no_sav', '2' = 'less100', '3' = '100to1000', '4' = '100to1000', '5' = 'over1000')
+data_credit$savings_account <- savings_account_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r savings_account_recode_result}
+# recoding results
+tab1(data_credit$savings_account, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'savings_account', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+Now let's see feature **employment_present**.
+
+
+&nbsp;
+
+```{r employment_present}
+# summary employment_present
+tab1(data_credit$employment_present, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'employment_present', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) ,, this categorical variable has 5 levels. Levels 1
+has very few observations  comparing to other levels so maybe it is a good idea to recode this variable in 4 levels:
+**unemp_less1year, 1to4, 4to7, 7plus**
+
+nbsp;
+
+
+```{r recode_employment_present}
+# recode employment_present
+employment_present_temp <- recode(data_credit$employment_present, '1' = 'unemp_less1year', '2' = 'unemp_less1year', '3' = '1to4', '4' = '4to7', '5' = '7plus')
+data_credit$employment_present <- employment_present_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r employment_present_recode_result}
+# recoding results
+tab1(data_credit$employment_present, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'employment_present', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+
+Now let's see feature **installment_rate_pct**.
+
+&nbsp;
+
+```{r installment_rate_pct}
+# summary installment_rate_pct
+tab1(data_credit$installment_rate_pct, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'installment_rate_pct', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) , this categorical variable has 4 levels. This levels are shown also in plot and frequency table. We will not transform this variable.
+
+&nbsp;
+
+Now let's see feature **status_sex**.
+
+&nbsp;
+
+```{r status_sex}
+# summary status_sex
+tab1(data_credit$status_sex, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'status_sex', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) ,, this categorical variable has 4 levels. We see that largest part of bank customers fall in group  3 (Male married or widowed). Levels 1 and 4 have very few observations  comparing to other levels so maybe it is a good idea to recode this variable in 3 levels **m_single_divorced, m_married_wid, female**
+
+nbsp;
+
+
+```{r recode_status_sex}
+# recode status_sex
+status_sex_temp <- recode(data_credit$status_sex, '1' = 'm_single_divorced', '2' = 'm_single_divorced', '3' = 'm_married_wid', '4' = 'female')
+data_credit$status_sex <- status_sex_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r status_sex_recode_result}
+# recoding results
+tab1(data_credit$status_sex, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'status_sex', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+
+Now let's see feature **other_debtors_guar**.
+
+&nbsp;
+
+```{r other_debtors_guar}
+# summary other_debtors_guar
+tab1(data_credit$other_debtors_guar, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'other_debtors_guar', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) , this categorical variable has 3 levels. This variable has data about known debtors / guarantors so we can recode this variable to 2 levels **yes, no** because levels 2 and 3 have very few observations  comparing to other levels.
+
+nbsp;
+
+
+```{r recode_other_debtors_guar}
+# recode other_debtors_guar
+other_debtors_guar_temp <- recode(data_credit$other_debtors_guar, '1' = 'no', '2' = 'yes', '3' = 'yes')
+data_credit$other_debtors_guar <- other_debtors_guar_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r other_debtors_guar_recode_result}
+# recoding results
+tab1(data_credit$other_debtors_guar, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'other_debtors_guar', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+
+Now let's see feature **residence_duration**.
+
+&nbsp;
+
+```{r residence_duration}
+# summary residence_duration
+tab1(data_credit$residence_duration, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'residence_duration', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) ,, this categorical variable has 4 levels. This variable will stay as it is.
+
+Now let's see feature **property**.
+
+&nbsp;
+
+```{r property}
+# summary property
+tab1(data_credit$property, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'property', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) ,, this categorical variable has 4 levels. We will not change this variable.
+
+nbsp;
+
+
+We will continue with numeric feature **age_years**.
+
+&nbsp;
+
+```{r age_years}
+# summary age_years
+summary(data_credit$age_years)
+data_credit %>% ggplot(aes(age_years)) + geom_density()
+```
+&nbsp;
+
+We notice that youngest customer is of age 19 and in the average bank customers are between 35-36 years old.
+
+&nbsp;
+
+
+
+Now let's see feature **other_install_plans**.
+
+&nbsp;
+
+```{r other_install_plans}
+# summary other_install_plans
+tab1(data_credit$other_install_plans, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'other_install_plans', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) ,, this categorical variable has 3 levels and has data about other credits that customer has in other banks or stores . We will recode this variable to 2 levels **yes, no** because level 2 has very few observations  comparing to other levels.
+
+nbsp;
+
+
+```{r recode_other_install_plans}
+# recode other_install_plans
+other_install_plans_temp <- recode(data_credit$other_install_plans, '1' = 'yes', '2' = 'yes', '3' = 'no')
+data_credit$other_install_plans <- other_install_plans_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r other_install_plans_recode_result}
+# recoding results
+tab1(data_credit$other_install_plans, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'other_install_plans', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+Next feature is **housing**.
+
+&nbsp;
+
+```{r housing}
+# summary housing
+tab1(data_credit$housing, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'housing', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) , this categorical variable has 3 levels. This variable will not be subject of transformation.
+
+nbsp;
+
+
+Now let's see feature **exist_credits_nr**.
+
+&nbsp;
+
+```{r exist_credits_nr}
+# summary exist_credits_nr
+tab1(data_credit$exist_credits_nr, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'exist_credits_nr', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) , this categorical variable has 4 levels. This variable has data about other known credits inside bank where customer is applying for a new credit. We will recode this variable to 2 levels ** one_credit, morethan1**.
+
+nbsp;
+
+
+```{r recode_exist_credits_nr}
+# recode exist_credits_nr
+exist_credits_nr_temp <- recode(data_credit$exist_credits_nr, '1' = 'one', '2' = 'morethan1', '3' = 'morethan1', '4' = 'morethan1')
+data_credit$exist_credits_nr <- exist_credits_nr_temp
+```
+
+&nbsp;
+
+The results of recoding:
+
+&nbsp;
+
+```{r exist_credits_nr_recode_result}
+# recoding results
+tab1(data_credit$exist_credits_nr, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent',  cex = 1, cex.names = 1, main = 'Distribution of data', xlab = 'exist_credits_nr', 
+ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+&nbsp;
+
+
+
+Now let's see feature **job**.
+
+&nbsp;
+
+```{r job}
+# summary job
+tab1(data_credit$job, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'job', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+According to  *Table 1: Distribution of categorical predictor variables for the South
+German Credit data, separately for good and bad credit risks* in [gromping2019](http://www1.beuth-hochschule.de/FB_II/reports/Report-2019-004.pdf) , this categorical variable has 4 levels. This variable has data about job skills level of bank customer who is applying for a new credit. We will not recode this variable.
+
+nbsp;
+
+Next feature  is **dependents_nr**.
+
+&nbsp;
+
+```{r dependents_nr}
+# summary dependents_nr
+tab1(data_credit$dependents_nr, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'dependents_nr', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+This categorical variable is binary and we will not transform it. 
+
+
+
+Now let's see feature **telephone_nr**.
+
+&nbsp;
+
+```{r telephone_nr}
+# summary telephone_nr
+tab1(data_credit$telephone_nr, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'telephone_nr', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+This categorical variable is binary and we will not transform it. 
+
+
+Last feature  is **foreign_worker**.
+
+&nbsp;
+
+```{r foreign_worker}
+# summary foreign_worker
+tab1(data_credit$foreign_worker, sort.group = 'decreasing', cum.percent = FALSE, bar.values = 'percent', main = 'Distribution of data', xlab = 'foreign_worker', 
+     ylab = 'count', col=c('red','yellow','blue'), horiz = TRUE) 
+```
+
+
+&nbsp;
+
+This categorical variable is binary and we will not transform it. 
+
+### Relationship between variables
+
+Now we will study relationships between our outcome **customer_good_bad** and other features. 
+
+
+For this we will build **crosstables**, also perform **chi-square** test for each pair (outcome,feature). We will use function  **CrossTable** from **gmodels** library [@R-gmodels]
+
+```{r cross-tables_code, results=FALSE}
+# Crosstables of outcome vs account_status
+CrossTable(data_credit$customer_good_bad,data_credit$account_status, digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T, dnn = c('customer_good_bad', 'account_status'))
+# Crosstables of outcome vs credit_history
+CrossTable(data_credit$customer_good_bad,data_credit$credit_history,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'credit_history'))
+# Crosstables of outcome vs credit_purpose
+CrossTable(data_credit$customer_good_bad,data_credit$credit_purpose,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'credit_purpose'))
+# Crosstables of outcome vs savings_account
+CrossTable(data_credit$customer_good_bad,data_credit$savings_account,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'savings_account'))
+# Crosstables of outcome vs employment_present
+CrossTable(data_credit$customer_good_bad,data_credit$employment_present, digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'employment_present'))
+# Crosstables of outcome vs installment_rate_pct
+CrossTable(data_credit$customer_good_bad,data_credit$installment_rate_pct,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'installment_rate_pct'))
+# Crosstables of outcome vs status_sex
+CrossTable(data_credit$customer_good_bad,data_credit$status_sex,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'status_sex'))
+# Crosstables of outcome vs other_debtors_guar
+CrossTable(data_credit$customer_good_bad,data_credit$other_debtors_guar,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'other_debtors_guar'))
+# Crosstables of outcome vs residence_duration
+CrossTable(data_credit$customer_good_bad,data_credit$residence_duration,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'residence_duration'))
+# Crosstables of outcome vs property
+CrossTable(data_credit$customer_good_bad,data_credit$property,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'property'))
+# Crosstables of outcome vs other_install_plans
+CrossTable(data_credit$customer_good_bad,data_credit$other_install_plans,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'other_install_plans'))
+# Crosstables of outcome vs housing
+CrossTable(data_credit$customer_good_bad,data_credit$housing,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'housing'))
+# Crosstables of outcome vs exist_credits_nr
+CrossTable(data_credit$customer_good_bad,data_credit$exist_credits_nr,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'exist_credits_nr'))
+# Crosstables of outcome vs job
+CrossTable(data_credit$customer_good_bad,data_credit$job,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'job'))
+# Crosstables of outcome vs dependents_nr
+CrossTable(data_credit$customer_good_bad,data_credit$dependents_nr,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'dependents_nr'))
+# Crosstables of outcome vs telephone_nr
+CrossTable(data_credit$customer_good_bad,data_credit$telephone_nr,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'telephone_nr'))
+# Crosstables of outcome vs foreign_worker
+CrossTable(data_credit$customer_good_bad,data_credit$foreign_worker,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'foreign_worker'))
+```
+
+The results of code are shown in Appendix A. The **null hypothesis** for statistical test is that *there is no relationship between outcome and chosen feature*.
+
+In the case of **customer_good_bad** and **account_status** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. Also we can check from the table that 90% of people who have a possitive account balance are listed as good creditors, which fits to intutive.
+
+In the case of **customer_good_bad** and **credit_history** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. From the table we notice that percentage of customers who have payed their debts are  listed as good creditors, which fits to intutive.
+
+
+In the case of **customer_good_bad** and **savings_account** test shows a p-value smaller than 0.05 so~ we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. From the table we notice that percentage of customers who have no money in their accounts are  listed as bad creditors, which fits to intutive.
+
+
+In the case of **customer_good_bad** and **employment_present** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. From the table we notice that percentage of customers who are unemployed or have less than 1 year of work and bad creditors are 93 out of 300 ( 31 %) and higher than  141 out of 700 (20 %) who are who are unemployed or have less than 1 year of work and good creditors.
+
+In the case of **customer_good_bad** and **credit_purpose** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. From the table we notice that 75 % of bad creditors (225 out of 300) have taken credit for **domestic** or **other** purposes. 
+
+In the case of **customer_good_bad** and **installment_rate_pct** test shows a p-value bigger than 0.05 so we keep null hypothesis  *there is no relationship between outcome and chosen feature*. 
+
+
+In the case of **customer_good_bad** and **status_sex** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. We also see that married men are twice more than single when it comes to good creditors. 
+
+
+In the case of **customer_good_bad** and **other_debtors_guar** test shows a p-value bigger than 0.05 so we keep null hypothesis  *there is no relationship between outcome and chosen feature*. 
+
+
+In the case of **customer_good_bad** and **residence_duration** test shows a p-value bigger than 0.05 so we keep null hypothesis  *there is no relationship between outcome and chosen feature*. 
+
+In the case of **customer_good_bad** and **property** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. 
+
+
+In the case of **customer_good_bad** and **other_install_plans** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. 
+
+In the case of **customer_good_bad** and **exist_credits_nr** test  shows a p-value bigger than 0.05 so we keep null hypothesis  *there is no relationship between outcome and chosen feature*. 
+
+
+In the case of **customer_good_bad** and **housing** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. 
+
+In the case of **customer_good_bad** and **job** test  shows a p-value bigger than 0.05 so we keep null hypothesis  *there is no relationship between outcome and chosen feature*.
+
+In the case of **customer_good_bad** and **telephone_nr** test  shows a p-value bigger than 0.05 so we keep null hypothesis  *there is no relationship between outcome and chosen feature*.
+
+In the case of **customer_good_bad** and **dependents_nr** test  shows a p-value bigger than 0.05 so we keep null hypothesis  *there is no relationship between outcome and chosen feature*.
+
+In the case of **customer_good_bad** and **foreign_worker** test shows a p-value smaller than 0.05 so we have reject null hypothesis and keep alternative hypothesis *there is some relationship between outcome and chosen feature*. 
+
+## Building models
+### Scaling numerical variables
+
+We have in our **data_credit** 3 numerical variables **duration_month, credit_amount,  age_years**. Before  starting modeling process we need to apply on these variables z-score normalization (from each feature value we substract mean and result divide by standart deviation). We will use function **scale**.
+
+```{r normalization}
+# normalization of numeric features
+data_credit %>%
+    mutate_if(is.numeric, scale)
+```
+
+### Data splitting
+
+The **caret** package [@R-caret] includes the function **createDataPartition** that helps us generates indexes for randomly splitting the data into training and test sets: We will split our data in half:
+
+&nbsp;
+
+```{r data-partititon}
+# Validation set will be 50% of South German Credit data
+# Set seed as a starting point
+set.seed(1, sample.kind='Rounding')
+# Store row numbers for train set: test_index
+test_index <- createDataPartition(y = data_credit$customer_good_bad, 
+times = 1, p = 0.5, list = FALSE)
+```
+
+&nbsp;
+
+We use the result of the **createDataPartition** function call to define the training and test sets like this:
+
+&nbsp;
+
+```{r data-partititon2 }
+# Create the train set 
+train <- data_credit[-test_index,]
+# Create the validation set 
+validation <- data_credit[test_index,]
+```
+
+Now, we can save the result of steps above (**train** and **validation** dataframes ) as R objects, so we can reload the final version of the data into the session for further analysis without repeating the process.
+
+&nbsp;
+
+```{r save-data}
+# Save our data as R objects
+save(train, file = './data/train.RData')
+save(validation, file = './data/validation.RData')
+```
+
+&nbsp;
+
+We see that **train** data frame has `r nrow(train)` rows and `r ncol(train)`
+variables, while **validation** data frame has `r nrow(validation)` rows and `r ncol(validation)`.
+
+Now let's print features of both data frames **train** and **validation** together to reassure ourselves that both contain the same features. We will use function **rCompare** from **dataCompareR** library[@dataCompareR]
+
+&nbsp;
+
+```{r basic_info}
+# compare train and validation
+library(dataCompareR)
+comp_train_val <- rCompare(train, validation)
+comp_summ <- summary(comp_train_val)
+comp_summ[c('datasetSummary', 'ncolInAOnly', 'ncolInBOnly', 'ncolCommon', 'rowsInAOnly', 'rowsInBOnly', 'nrowCommon')] 
+```
+
+&nbsp;
+
+### Logistic Regression model
+
+We will start with a Logistic Regression model. Logistic regression is a specific case of a set of generalized linear models. For logistic regression, outcome is a categorical variable  which fits very well to our case since we have outcome **customer_good_bad** as categorical variable with 2 levels. In R, we can fit the logistic regression model with the function glm: generalized linear models. This function is
+more general than logistic regression so we need to specify the model we want through the family parameter [@irizarry2019]:
+
+&nbsp;
+
+```{r initial-model}
+# Fitting initial model
+glm_model <- glm(customer_good_bad ~ ., family = 'binomial', data = train)
+# Obtain significance levels using summary()
+summary(glm_model)
+```
+&nbsp;
+
+We see that some of variables have 3 stars beside them. This variables are statistically significant(have p-values < 0.05). Le' s filter them:
+
+&nbsp;
+
+```{r significant-variables}
+# Filter significant values
+sig <- summary(glm_model)$coeff[-1,4] < 0.05
+names(sig)[sig == T]
+```
+
+&nbsp;
+
+Next let's obtain prediction using the **predict** function:
+
+```{r prediction}
+# Predictions
+pred_logit <- predict(glm_model, newdata = validation, type = 'response')
+```
+
+To form a prediction, we define a decision rule:  predict *good_creditor* if pred_logit > 0.5. Let's evaluate the accuracy of our model using function **confusionMatrix** from **caret** library[@R-caret]:
+
+```{r confussion-matrix}
+# convert pred_logit to a vector of binary values : put as cut pred_logit > 0.5
+y_hat_glm <- factor(ifelse(pred_logit > 0.5, 1, 0))
+# print confusion matrix
+confusionMatrix(y_hat_glm,
+                reference=validation$customer_good_bad,
+                positive='1')
+```
+
+
+Since the output contains too much information, let's print only value of **accuracy** :
+
+```{r accuracy}
+# Print only accuracy
+confusionMatrix(y_hat_glm, reference=validation$customer_good_bad,
+                positive='1')$overall['Accuracy']
+
+
+```
+
+We obtained an overall accuracy of 73.6 %.  The prediction for bad creditors is good judged by value of **Specificity** 44%. Sensitivity is 86%, which is quite good. Also we notice that NPV is nearly 58%, and PPV is almost 78%.
+
+
+### Classification Tree model
+
+Let' build our model will all features included. For building the decision tree we will use function **rpart** from **rpart** library[@R-rpart]
+
+```{r class-tree}
+# Decision Tree model
+credit_tree <- rpart(customer_good_bad ~ . , method='class', data=train)
+# Plot the decision tree
+plot(credit_tree, uniform = TRUE)
+#Add labels
+text(credit_tree)
+```
+
+Let's make our prediction as we did with previous model
+
+```{r class-tree-pred}
+# Predictions
+pred_tree <- predict(credit_tree, newdata = validation, type = 'class')
+```
+
+
+Let's evaluate the accuracy of our model:
+
+```{r confussion-matrix-tree}
+# print confusion matrix
+confusionMatrix(pred_tree,
+                reference=validation$customer_good_bad,
+                positive='1')
+```
+
+
+Since the output contains too much information, let's print only value of **accuracy** :
+
+```{r pred_tree_accuracy}
+# Print only accuracy
+confusionMatrix(pred_tree, reference=validation$customer_good_bad,
+                positive='1')$overall['Accuracy']
+
+
+```
+
+We obtained an overall accuracy of 70.2 %.   Sensitivity is 84.86%, a very good one, and specificity is 36%. 
+
+## Results
+
+  - We build  a logistic regression model with accuracy of 73.6 %. Specificity of this model was 44% and sensitivity 86 %. 
+
+  - We build a classification tree model with accuracy of 70.2 %.  Sensitivity is 84.86 and specificity is 36%. 
+
+
+## Conclusions
+
+In project with real-life credit data, we tried to model credit risk by using logistic regression and decision trees in R.
+
+Credit risk models are very important for financial institutions such as banks. The risk of creditor not turning the loan is a parameter which can be modeled and measured apriori in order to minimize loses. Machine learning algorithms and techniques come in help in such problems. 
+
+
+## Appendix A
+
+```{r cross-tables_results, echo=FALSE}
+# Crosstables of outcome vs account_status
+CrossTable(data_credit$customer_good_bad,data_credit$account_status, digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T, dnn = c('customer_good_bad', 'account_status'))
+# Crosstables of outcome vs credit_history
+CrossTable(data_credit$customer_good_bad,data_credit$credit_history,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'credit_history'))
+# Crosstables of outcome vs credit_purpose
+CrossTable(data_credit$customer_good_bad,data_credit$credit_purpose,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'credit_purpose'))
+# Crosstables of outcome vs savings_account
+CrossTable(data_credit$customer_good_bad,data_credit$savings_account,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'savings_account'))
+# Crosstables of outcome vs employment_present
+CrossTable(data_credit$customer_good_bad,data_credit$employment_present, digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'employment_present'))
+# Crosstables of outcome vs installment_rate_pct
+CrossTable(data_credit$customer_good_bad,data_credit$installment_rate_pct,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'installment_rate_pct'))
+# Crosstables of outcome vs status_sex
+CrossTable(data_credit$customer_good_bad,data_credit$status_sex,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'status_sex'))
+# Crosstables of outcome vs other_debtors_guar
+CrossTable(data_credit$customer_good_bad,data_credit$other_debtors_guar,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'other_debtors_guar'))
+# Crosstables of outcome vs residence_duration
+CrossTable(data_credit$customer_good_bad,data_credit$residence_duration,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'residence_duration'))
+# Crosstables of outcome vs property
+CrossTable(data_credit$customer_good_bad,data_credit$property,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'property'))
+# Crosstables of outcome vs other_install_plans
+CrossTable(data_credit$customer_good_bad,data_credit$other_install_plans,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'other_install_plans'))
+# Crosstables of outcome vs housing
+CrossTable(data_credit$customer_good_bad,data_credit$housing,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'housing'))
+# Crosstables of outcome vs exist_credits_nr
+CrossTable(data_credit$customer_good_bad,data_credit$exist_credits_nr,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'exist_credits_nr'))
+# Crosstables of outcome vs job
+CrossTable(data_credit$customer_good_bad,data_credit$job,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'job'))
+# Crosstables of outcome vs dependents_nr
+CrossTable(data_credit$customer_good_bad,data_credit$dependents_nr,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'dependents_nr'))
+# Crosstables of outcome vs telephone_nr
+CrossTable(data_credit$customer_good_bad,data_credit$telephone_nr,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'telephone_nr'))
+# Crosstables of outcome vs foreign_worker
+CrossTable(data_credit$customer_good_bad,data_credit$foreign_worker,  digits=1, prop.r=F, prop.t=F, prop.chisq=F, chisq=T,  dnn = c('customer_good_bad', 'foreign_worker'))
+```
+
+
+## References
